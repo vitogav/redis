@@ -1,3 +1,20 @@
+GEODE REDIS ADAPTER TEST SUITE
+------------------------------
+
+In order to run the modified redis test suite against the redis
+adapter in Geode, clone this repo and make redis normally. Then have
+a Geode checkout and build it.
+
+To run the test:
+./geodeTestSuite.sh "path/to/Geode/installation"
+
+
+
+
+
+
+
+
 Where to find complete Redis documentation?
 -------------------------------------------
 
