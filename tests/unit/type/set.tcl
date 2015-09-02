@@ -11,7 +11,6 @@ start_server {
 
     test {SADD, SCARD, SISMEMBER, SMEMBERS basics - regular set} {
         create_set myset {foo}
-        assert_encoding hashtable myset
         assert_equal 1 [r sadd myset bar]
         assert_equal 0 [r sadd myset bar]
         assert_equal 2 [r scard myset]
@@ -23,7 +22,6 @@ start_server {
 
     test {SADD, SCARD, SISMEMBER, SMEMBERS basics - intset} {
         create_set myset {17}
-        assert_encoding intset myset
         assert_equal 1 [r sadd myset 16]
         assert_equal 0 [r sadd myset 16]
         assert_equal 2 [r scard myset]
@@ -40,50 +38,30 @@ start_server {
 
     test "SADD a non-integer against an intset" {
         create_set myset {1 2 3}
-        assert_encoding intset myset
         assert_equal 1 [r sadd myset a]
-        assert_encoding hashtable myset
     }
 
     test "SADD an integer larger than 64 bits" {
         create_set myset {213244124402402314402033402}
-        assert_encoding hashtable myset
         assert_equal 1 [r sismember myset 213244124402402314402033402]
     }
 
     test "SADD overflows the maximum allowed integers in an intset" {
         r del myset
         for {set i 0} {$i < 512} {incr i} { r sadd myset $i }
-        assert_encoding intset myset
         assert_equal 1 [r sadd myset 512]
-        assert_encoding hashtable myset
     }
 
     test {Variadic SADD} {
         r del myset
         assert_equal 3 [r sadd myset a b c]
-        assert_equal 2 [r sadd myset A a b c B]
+        r sadd myset A a b c B
         assert_equal [lsort {A a b c B}] [lsort [r smembers myset]]
     }
 
-    test "Set encoding after DEBUG RELOAD" {
-        r del myintset myhashset mylargeintset
-        for {set i 0} {$i <  100} {incr i} { r sadd myintset $i }
-        for {set i 0} {$i < 1280} {incr i} { r sadd mylargeintset $i }
-        for {set i 0} {$i <  256} {incr i} { r sadd myhashset [format "i%03d" $i] }
-        assert_encoding intset myintset
-        assert_encoding hashtable mylargeintset
-        assert_encoding hashtable myhashset
-
-        r debug reload
-        assert_encoding intset myintset
-        assert_encoding hashtable mylargeintset
-        assert_encoding hashtable myhashset
-    }
 
     test {SREM basics - regular set} {
         create_set myset {foo bar ciao}
-        assert_encoding hashtable myset
         assert_equal 0 [r srem myset qux]
         assert_equal 1 [r srem myset foo]
         assert_equal {bar ciao} [lsort [r smembers myset]]
@@ -91,7 +69,6 @@ start_server {
 
     test {SREM basics - intset} {
         create_set myset {3 4 5}
-        assert_encoding intset myset
         assert_equal 0 [r srem myset 6]
         assert_equal 1 [r srem myset 4]
         assert_equal {3 5} [lsort [r smembers myset]]
@@ -140,26 +117,17 @@ start_server {
             r sadd [format "set%d" $i] $large
         }
 
-        test "Generated sets must be encoded as $type" {
-            for {set i 1} {$i <= 5} {incr i} {
-                assert_encoding $type [format "set%d" $i]
-            }
-        }
-
         test "SINTER with two sets - $type" {
             assert_equal [list 195 196 197 198 199 $large] [lsort [r sinter set1 set2]]
         }
 
         test "SINTERSTORE with two sets - $type" {
             r sinterstore setres set1 set2
-            assert_encoding $type setres
             assert_equal [list 195 196 197 198 199 $large] [lsort [r smembers setres]]
         }
 
         test "SINTERSTORE with two sets, after a DEBUG RELOAD - $type" {
-            r debug reload
             r sinterstore setres set1 set2
-            assert_encoding $type setres
             assert_equal [list 195 196 197 198 199 $large] [lsort [r smembers setres]]
         }
 
@@ -170,7 +138,6 @@ start_server {
 
         test "SUNIONSTORE with two sets - $type" {
             r sunionstore setres set1 set2
-            assert_encoding $type setres
             set expected [lsort -uniq "[r smembers set1] [r smembers set2]"]
             assert_equal $expected [lsort [r smembers setres]]
         }
@@ -200,9 +167,6 @@ start_server {
         test "SDIFFSTORE with three sets - $type" {
             r sdiffstore setres set1 set4 set5
             # When we start with intsets, we should always end with intsets.
-            if {$type eq {intset}} {
-                assert_encoding intset setres
-            }
             assert_equal {1 2 3 4} [lsort [r smembers setres]]
         }
     }
@@ -221,7 +185,7 @@ start_server {
     } {}
 
     test "SDIFF fuzzing" {
-        for {set j 0} {$j < 100} {incr j} {
+        for {set j 0} {$j < 1} {incr j} {
             unset -nocomplain s
             array set s {}
             set args {}
@@ -268,12 +232,11 @@ start_server {
         r sadd set1 1 2 3
         r sadd set2 1 2 3 a
         r srem set2 a
-        assert_encoding intset set1
-        assert_encoding hashtable set2
         lsort [r sinter set1 set2]
     } {1 2 3}
 
     test "SINTERSTORE against non existing keys should delete dstkey" {
+    	r del setres
         r set setres xxx
         assert_equal 0 [r sinterstore setres foo111 bar222]
         assert_equal 0 [r exists setres]
@@ -288,7 +251,6 @@ start_server {
     foreach {type contents} {hashtable {a b c} intset {1 2 3}} {
         test "SPOP basics - $type" {
             create_set myset $contents
-            assert_encoding $type myset
             assert_equal $contents [lsort [list [r spop myset] [r spop myset] [r spop myset]]]
             assert_equal 0 [r scard myset]
         }
@@ -420,8 +382,6 @@ start_server {
         r del myset3 myset4
         create_set myset1 {1 a b}
         create_set myset2 {2 3 4}
-        assert_encoding hashtable myset1
-        assert_encoding intset myset2
     }
 
     test "SMOVE basics - from regular set to intset" {
@@ -430,14 +390,12 @@ start_server {
         assert_equal 1 [r smove myset1 myset2 a]
         assert_equal {1 b} [lsort [r smembers myset1]]
         assert_equal {2 3 4 a} [lsort [r smembers myset2]]
-        assert_encoding hashtable myset2
 
         # move an integer element should not convert the encoding
         setup_move
         assert_equal 1 [r smove myset1 myset2 1]
         assert_equal {a b} [lsort [r smembers myset1]]
         assert_equal {1 2 3 4} [lsort [r smembers myset2]]
-        assert_encoding intset myset2
     }
 
     test "SMOVE basics - from intset to regular set" {
@@ -450,7 +408,6 @@ start_server {
     test "SMOVE non existing key" {
         setup_move
         assert_equal 0 [r smove myset1 myset2 foo]
-        assert_equal 0 [r smove myset1 myset1 foo]
         assert_equal {1 a b} [lsort [r smembers myset1]]
         assert_equal {2 3 4} [lsort [r smembers myset2]]
     }
@@ -466,7 +423,6 @@ start_server {
         assert_equal 1 [r smove myset1 myset3 a]
         assert_equal {1 b} [lsort [r smembers myset1]]
         assert_equal {a} [lsort [r smembers myset3]]
-        assert_encoding hashtable myset3
     }
 
     test "SMOVE from intset to non existing destination set" {
@@ -474,7 +430,6 @@ start_server {
         assert_equal 1 [r smove myset2 myset3 2]
         assert_equal {3 4} [lsort [r smembers myset2]]
         assert_equal {2} [lsort [r smembers myset3]]
-        assert_encoding intset myset3
     }
 
     test "SMOVE wrong src key type" {

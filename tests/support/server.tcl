@@ -32,26 +32,6 @@ proc kill_server config {
     if {![is_alive $config]} { return }
     set pid [dict get $config pid]
 
-    # check for leaks
-    if {![dict exists $config "skipleaks"]} {
-        catch {
-            if {[string match {*Darwin*} [exec uname -a]]} {
-                tags {"leaks"} {
-                    test "Check for memory leaks (pid $pid)" {
-                        set output {0 leaks}
-                        catch {exec leaks $pid} output
-                        if {[string match {*process does not exist*} $output] ||
-                            [string match {*cannot examine*} $output]} {
-                            # In a few tests we kill the server process.
-                            set output "0 leaks"
-                        }
-                        set output
-                    } {*0 leaks*}
-                }
-            }
-        }
-    }
-
     # kill server and wait for the process to be totally exited
     catch {exec kill $pid}
     if {$::valgrind} {
@@ -71,10 +51,6 @@ proc kill_server config {
         after 10
     }
 
-    # Check valgrind errors if needed
-    if {$::valgrind} {
-        check_valgrind_errors [dict get $config stderr]
-    }
 
     # Remove this pid from the set of active pids in the test server.
     send_data_packet $::test_server_fd server-killed $pid
@@ -147,7 +123,7 @@ proc start_server {options {code undefined}} {
             dict set srv "port" $::port
             set client [redis $::host $::port]
             dict set srv "client" $client
-            $client select 9
+            #$client select 9
 
             # append the server to the stack
             lappend ::servers $srv
@@ -210,11 +186,13 @@ proc start_server {options {code undefined}} {
 
     set stdout [format "%s/%s" [dict get $config "dir"] "stdout"]
     set stderr [format "%s/%s" [dict get $config "dir"] "stderr"]
-
+    set classpath $::env(GEODE_CLASSPATH)
     if {$::valgrind} {
         set pid [exec valgrind --track-origins=yes --suppressions=src/valgrind.sup --show-reachable=no --show-possibly-lost=no --leak-check=full src/redis-server $config_file > $stdout 2> $stderr &]
     } else {
-        set pid [exec src/redis-server $config_file > $stdout 2> $stderr &]
+    	#set pid [exec java -cp "/Users/vgavrilov/Documents/MyGeode/incubator-geode/gemfire-core/build-eclipse:/Users/vgavrilov/Documents/MyGeode/incubator-geode/gemfire-assembly/build/install/apache-geode/lib/*" com.gemstone.gemfire.redis.GemFireRedisServer -bind-address=${::host} -port=${::port} -log-level=error > $stdout 2> $stderr &]	
+    	set pid [exec java -Dgemfire.mcast-port=0 -cp $classpath com.gemstone.gemfire.redis.GemFireRedisServer -bind-address=${::host} -port=${::port} -log-level=error > $stdout 2> $stderr &]
+        after 15000
     }
 
     # Tell the test server about this new instance.
@@ -246,10 +224,10 @@ proc start_server {options {code undefined}} {
     }
 
     # Wait for actual startup
-    while {![info exists _pid]} {
-        regexp {PID:\s(\d+)} [exec cat $stdout] _ _pid
-        after 100
-    }
+    #while {![info exists _pid]} {
+    #    regexp {PID:\s(\d+)} [exec cat $stdout] _ _pid
+    #    after 100
+    #}
 
     # setup properties to be able to initialize a client object
     set host $::host
@@ -274,13 +252,13 @@ proc start_server {options {code undefined}} {
             error_and_quit $config_file $line
         }
 
-        while 1 {
+        #while 1 {
             # check that the server actually started and is ready for connections
-            if {[exec grep "ready to accept" | wc -l < $stdout] > 0} {
-                break
-            }
-            after 10
-        }
+         #   if {[exec grep "ready to accept" | wc -l < $stdout] > 0} {
+          #      break
+           # }
+           # after 10
+       # }
 
         # append the server to the stack
         lappend ::servers $srv

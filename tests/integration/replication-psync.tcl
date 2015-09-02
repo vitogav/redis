@@ -13,11 +13,7 @@ proc stop_bg_complex_data {handle} {
 #
 # You can specifiy backlog size, ttl, delay before reconnection, test duration
 # in seconds, and an additional condition to verify at the end.
-#
-# If reconnect is > 0, the test actually try to break the connection and
-# reconnect with the master, otherwise just the initial synchronization is
-# checked for consistency.
-proc test_psync {descr duration backlog_size backlog_ttl delay cond diskless reconnect} {
+proc test_psync {descr duration backlog_size backlog_ttl delay cond} {
     start_server {tags {"repl"}} {
         start_server {} {
 
@@ -28,8 +24,6 @@ proc test_psync {descr duration backlog_size backlog_ttl delay cond diskless rec
 
             $master config set repl-backlog-size $backlog_size
             $master config set repl-backlog-ttl $backlog_ttl
-            $master config set repl-diskless-sync $diskless
-            $master config set repl-diskless-sync-delay 1
 
             set load_handle0 [start_bg_complex_data $master_host $master_port 9 100000]
             set load_handle1 [start_bg_complex_data $master_host $master_port 11 100000]
@@ -54,24 +48,22 @@ proc test_psync {descr duration backlog_size backlog_ttl delay cond diskless rec
                 }
             }
 
-            test "Test replication partial resync: $descr (diskless: $diskless, reconnect: $reconnect)" {
+            test "Test replication partial resync: $descr" {
                 # Now while the clients are writing data, break the maste-slave
                 # link multiple times.
-                if ($reconnect) {
-                    for {set j 0} {$j < $duration*10} {incr j} {
-                        after 100
-                        # catch {puts "MASTER [$master dbsize] keys, SLAVE [$slave dbsize] keys"}
+                for {set j 0} {$j < $duration*10} {incr j} {
+                    after 100
+                    # catch {puts "MASTER [$master dbsize] keys, SLAVE [$slave dbsize] keys"}
 
-                        if {($j % 20) == 0} {
-                            catch {
-                                if {$delay} {
-                                    $slave multi
-                                    $slave client kill $master_host:$master_port
-                                    $slave debug sleep $delay
-                                    $slave exec
-                                } else {
-                                    $slave client kill $master_host:$master_port
-                                }
+                    if {($j % 20) == 0} {
+                        catch {
+                            if {$delay} {
+                                $slave multi
+                                $slave client kill $master_host:$master_port
+                                $slave debug sleep $delay
+                                $slave exec
+                            } else {
+                                $slave client kill $master_host:$master_port
                             }
                         }
                     }
@@ -106,23 +98,18 @@ proc test_psync {descr duration backlog_size backlog_ttl delay cond diskless rec
     }
 }
 
-foreach diskless {no yes} {
-    test_psync {no reconnection, just sync} 6 1000000 3600 0 {
-    } $diskless 0
+test_psync {ok psync} 6 1000000 3600 0 {
+    assert {[s -1 sync_partial_ok] > 0}
+}
 
-    test_psync {ok psync} 6 1000000 3600 0 {
-        assert {[s -1 sync_partial_ok] > 0}
-    } $diskless 1
+test_psync {no backlog} 6 100 3600 0.5 {
+    assert {[s -1 sync_partial_err] > 0}
+}
 
-    test_psync {no backlog} 6 100 3600 0.5 {
-        assert {[s -1 sync_partial_err] > 0}
-    } $diskless 1
+test_psync {ok after delay} 3 100000000 3600 3 {
+    assert {[s -1 sync_partial_ok] > 0}
+}
 
-    test_psync {ok after delay} 3 100000000 3600 3 {
-        assert {[s -1 sync_partial_ok] > 0}
-    } $diskless 1
-
-    test_psync {backlog expired} 3 100000000 1 3 {
-        assert {[s -1 sync_partial_err] > 0}
-    } $diskless 1
+test_psync {backlog expired} 3 100000000 1 3 {
+    assert {[s -1 sync_partial_err] > 0}
 }

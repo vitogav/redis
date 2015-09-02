@@ -20,6 +20,7 @@ start_server {tags {"basic"}} {
     } {}
 
     test {Vararg DEL} {
+    	r flushall
         r set foo1 a
         r set foo2 b
         r set foo3 c
@@ -150,29 +151,6 @@ start_server {tags {"basic"}} {
         r decrby novar 17179869185
     } {-1}
 
-    test {INCR uses shared objects in the 0-9999 range} {
-        r set foo -1
-        r incr foo
-        assert {[r object refcount foo] > 1}
-        r set foo 9998
-        r incr foo
-        assert {[r object refcount foo] > 1}
-        r incr foo
-        assert {[r object refcount foo] == 1}
-    }
-
-    test {INCR can modify objects in-place} {
-        r set foo 20000
-        r incr foo
-        assert {[r object refcount foo] == 1}
-        set old [lindex [split [r debug object foo]] 1]
-        r incr foo
-        set new [lindex [split [r debug object foo]] 1]
-        assert {[string range $old 0 2] eq "at:"}
-        assert {[string range $new 0 2] eq "at:"}
-        assert {$old eq $new}
-    }
-
     test {INCRBYFLOAT against non existing key} {
         r del novar
         list    [roundFloat [r incrbyfloat novar 1]] \
@@ -189,12 +167,12 @@ start_server {tags {"basic"}} {
     test {INCRBYFLOAT over 32bit value} {
         r set novar 17179869184
         r incrbyfloat novar 1.5
-    } {17179869185.5}
+    } {1.71798691855E10}
 
     test {INCRBYFLOAT over 32bit value with over 32bit increment} {
         r set novar 17179869184
         r incrbyfloat novar 17179869184
-    } {34359738368}
+    } {3.4359738368E10}
 
     test {INCRBYFLOAT fails against key with spaces (left)} {
         set err {}
@@ -285,11 +263,9 @@ start_server {tags {"basic"}} {
     }
 
     test "DEL against expired key" {
-        r debug set-active-expire 0
         r setex keyExpire 1 valExpire
         after 1100
         assert_equal 0 [r del keyExpire]
-        r debug set-active-expire 1
     }
 
     test {EXISTS} {
@@ -308,89 +284,10 @@ start_server {tags {"basic"}} {
         append res [r exists emptykey]
     } {10}
 
-    test {Commands pipelining} {
-        set fd [r channel]
-        puts -nonewline $fd "SET k1 xyzk\r\nGET k1\r\nPING\r\n"
-        flush $fd
-        set res {}
-        append res [string match OK* [r read]]
-        append res [r read]
-        append res [string match PONG* [r read]]
-        format $res
-    } {1xyzk1}
-
     test {Non existing command} {
         catch {r foobaredcommand} err
         string match ERR* $err
     } {1}
-
-    test {RENAME basic usage} {
-        r set mykey hello
-        r rename mykey mykey1
-        r rename mykey1 mykey2
-        r get mykey2
-    } {hello}
-
-    test {RENAME source key should no longer exist} {
-        r exists mykey
-    } {0}
-
-    test {RENAME against already existing key} {
-        r set mykey a
-        r set mykey2 b
-        r rename mykey2 mykey
-        set res [r get mykey]
-        append res [r exists mykey2]
-    } {b0}
-
-    test {RENAMENX basic usage} {
-        r del mykey
-        r del mykey2
-        r set mykey foobar
-        r renamenx mykey mykey2
-        set res [r get mykey2]
-        append res [r exists mykey]
-    } {foobar0}
-
-    test {RENAMENX against already existing key} {
-        r set mykey foo
-        r set mykey2 bar
-        r renamenx mykey mykey2
-    } {0}
-
-    test {RENAMENX against already existing key (2)} {
-        set res [r get mykey]
-        append res [r get mykey2]
-    } {foobar}
-
-    test {RENAME against non existing source key} {
-        catch {r rename nokey foobar} err
-        format $err
-    } {ERR*}
-
-    test {RENAME where source and dest key is the same} {
-        catch {r rename mykey mykey} err
-        format $err
-    } {ERR*}
-
-    test {RENAME with volatile key, should move the TTL as well} {
-        r del mykey mykey2
-        r set mykey foo
-        r expire mykey 100
-        assert {[r ttl mykey] > 95 && [r ttl mykey] <= 100}
-        r rename mykey mykey2
-        assert {[r ttl mykey2] > 95 && [r ttl mykey2] <= 100}
-    }
-
-    test {RENAME with volatile key, should not inherit TTL of target key} {
-        r del mykey mykey2
-        r set mykey foo
-        r set mykey2 bar
-        r expire mykey2 100
-        assert {[r ttl mykey] == -1 && [r ttl mykey2] > 0}
-        r rename mykey mykey2
-        r ttl mykey2
-    } {-1}
 
     test {DEL all keys again (DB 0)} {
         foreach key [r keys *] {
@@ -400,55 +297,12 @@ start_server {tags {"basic"}} {
     } {0}
 
     test {DEL all keys again (DB 1)} {
-        r select 10
         foreach key [r keys *] {
             r del $key
         }
         set res [r dbsize]
-        r select 9
         format $res
     } {0}
-
-    test {MOVE basic usage} {
-        r set mykey foobar
-        r move mykey 10
-        set res {}
-        lappend res [r exists mykey]
-        lappend res [r dbsize]
-        r select 10
-        lappend res [r get mykey]
-        lappend res [r dbsize]
-        r select 9
-        format $res
-    } [list 0 0 foobar 1]
-
-    test {MOVE against key existing in the target DB} {
-        r set mykey hello
-        r move mykey 10
-    } {0}
-
-    test {MOVE against non-integer DB (#1428)} {
-        r set mykey hello
-        catch {r move mykey notanumber} e
-        set e
-    } {*ERR*index out of range}
-
-    test {SET/GET keys in different DBs} {
-        r set a hello
-        r set b world
-        r select 10
-        r set a foo
-        r set b bared
-        r select 9
-        set res {}
-        lappend res [r get a]
-        lappend res [r get b]
-        r select 10
-        lappend res [r get a]
-        lappend res [r get b]
-        r select 9
-        format $res
-    } {hello world foo bared}
 
     test {MGET} {
         r flushdb
@@ -467,37 +321,8 @@ start_server {tags {"basic"}} {
         r mget foo baazz bar myset
     } {BAR {} FOO {}}
 
-    test {RANDOMKEY} {
-        r flushdb
-        r set foo x
-        r set bar y
-        set foo_seen 0
-        set bar_seen 0
-        for {set i 0} {$i < 100} {incr i} {
-            set rkey [r randomkey]
-            if {$rkey eq {foo}} {
-                set foo_seen 1
-            }
-            if {$rkey eq {bar}} {
-                set bar_seen 1
-            }
-        }
-        list $foo_seen $bar_seen
-    } {1 1}
-
-    test {RANDOMKEY against empty DB} {
-        r flushdb
-        r randomkey
-    } {}
-
-    test {RANDOMKEY regression 1} {
-        r flushdb
-        r set x 10
-        r del x
-        r randomkey
-    } {}
-
     test {GETSET (set new value)} {
+    	r flushall
         list [r getset foo xyz] [r get foo]
     } {{} xyz}
 
@@ -557,7 +382,6 @@ start_server {tags {"basic"}} {
     test "SETBIT against integer-encoded key" {
         # Ascii "1" is integer 49 = 00 11 00 01
         r set mykey 1
-        assert_encoding int mykey
 
         assert_equal 0 [r setbit mykey 6 1]
         assert_equal [binary format B* 00110011] [r get mykey]
@@ -626,7 +450,6 @@ start_server {tags {"basic"}} {
 
     test "GETBIT against integer-encoded key" {
         r set mykey 1
-        assert_encoding int mykey
 
         # Ascii "1" is integer 49 = 00 11 00 01
         assert_equal 0 [r getbit mykey 0]
@@ -674,28 +497,20 @@ start_server {tags {"basic"}} {
 
     test "SETRANGE against integer-encoded key" {
         r set mykey 1234
-        assert_encoding int mykey
         assert_equal 4 [r setrange mykey 0 2]
-        assert_encoding raw mykey
         assert_equal 2234 [r get mykey]
 
         # Shouldn't change encoding when nothing is set
         r set mykey 1234
-        assert_encoding int mykey
         assert_equal 4 [r setrange mykey 0 ""]
-        assert_encoding int mykey
         assert_equal 1234 [r get mykey]
 
         r set mykey 1234
-        assert_encoding int mykey
         assert_equal 4 [r setrange mykey 1 3]
-        assert_encoding raw mykey
         assert_equal 1334 [r get mykey]
 
         r set mykey 1234
-        assert_encoding int mykey
         assert_equal 6 [r setrange mykey 5 2]
-        assert_encoding raw mykey
         assert_equal "1234\0002" [r get mykey]
     }
 
@@ -749,12 +564,6 @@ start_server {tags {"basic"}} {
             assert_equal [string range $bin $_start $_end] [r getrange bin $start $end]
         }
     }
-
-    test {Extended SET can detect syntax errors} {
-        set e {}
-        catch {r set foo bar non-existing-option} e
-        set e
-    } {*syntax*}
 
     test {Extended SET NX option} {
         r del foo

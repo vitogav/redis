@@ -12,9 +12,6 @@ source tests/support/test.tcl
 source tests/support/util.tcl
 
 set ::all_tests {
-    unit/printver
-    unit/dump
-    unit/auth
     unit/protocol
     unit/basic
     unit/scan
@@ -30,24 +27,9 @@ set ::all_tests {
     unit/multi
     unit/quit
     unit/aofrw
-    integration/replication
-    integration/replication-2
-    integration/replication-3
-    integration/replication-4
-    integration/replication-psync
-    integration/aof
-    integration/rdb
-    integration/convert-zipmap-hash-on-load
-    integration/logging
-    unit/pubsub
-    unit/slowlog
-    unit/scripting
-    unit/maxmemory
-    unit/introspection
     unit/limits
     unit/obuf-limits
     unit/bitops
-    unit/memefficiency
     unit/hyperloglog
 }
 # Index to the next test to run in the ::all_tests list.
@@ -57,7 +39,7 @@ set ::host 127.0.0.1
 set ::port 21111
 set ::traceleaks 0
 set ::valgrind 0
-set ::verbose 0
+set ::verbose 1
 set ::quiet 0
 set ::denytags {}
 set ::allowtags {}
@@ -126,11 +108,6 @@ proc reconnect {args} {
     set client [redis $host $port]
     dict set srv "client" $client
 
-    # select the right db when we don't have to authenticate
-    if {![dict exists $config "requirepass"]} {
-        $client select 9
-    }
-
     # re-set $srv in the servers list
     lset ::servers end+$level $srv
 }
@@ -144,10 +121,6 @@ proc redis_deferring_client {args} {
 
     # create client that defers reading reply
     set client [redis [srv $level "host"] [srv $level "port"] 1]
-
-    # select the right db and read the response (OK)
-    $client select 9
-    $client read
     return $client
 }
 
